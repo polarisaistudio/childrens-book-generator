@@ -11,13 +11,18 @@ import logging
 import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from contextlib import asynccontextmanager
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
 
 # FastAPI and web framework imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator  # Updated import
 import uvicorn
 
 # AI/ML imports
@@ -81,7 +86,8 @@ class BookRequest(BaseModel):
     book_length: Optional[str] = "short"  # short, medium, long
     illustration_style: Optional[str] = "cartoon"  # cartoon, watercolor, realistic
     
-    @validator('child_name')
+    @field_validator('child_name')  # Updated to Pydantic V2
+    @classmethod
     def validate_child_name(cls, v):
         if not v or len(v.strip()) < 1:
             raise ValueError('Child name is required')
@@ -89,13 +95,15 @@ class BookRequest(BaseModel):
             raise ValueError('Child name must be less than 50 characters')
         return v.strip()
     
-    @validator('age')
+    @field_validator('age')  # Updated to Pydantic V2
+    @classmethod
     def validate_age(cls, v):
         if v < 3 or v > 12:
             raise ValueError('Age must be between 3 and 12 years')
         return v
     
-    @validator('interests')
+    @field_validator('interests')  # Updated to Pydantic V2
+    @classmethod
     def validate_interests(cls, v):
         if not v or len(v) == 0:
             raise ValueError('At least one interest is required')
@@ -267,6 +275,9 @@ class IllustrationGenerator:
         
         if self.diffusion_available:
             try:
+                # Try to import transformers
+                import transformers
+                
                 self.pipe = StableDiffusionPipeline.from_pretrained(
                     "runwayml/stable-diffusion-v1-5",
                     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
@@ -402,16 +413,37 @@ class SafetyFilter:
         return story_data
 
 # =============================================================================
-# APPLICATION SETUP
+# APPLICATION SETUP WITH LIFESPAN
 # =============================================================================
 
-# Initialize FastAPI app
+# Global stats (in production, use a database)
+app_stats = {
+    "books_generated": 0,
+    "total_generation_time": 0.0,
+    "startup_time": datetime.now().isoformat()
+}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan - startup and shutdown"""
+    # Startup
+    logger.info("🚀 Starting AI Children's Book Generator")
+    logger.info(f"📝 OpenAI API: {'✅ Connected' if Config.OPENAI_API_KEY else '❌ Missing'}")
+    logger.info(f"🎨 Image Generation: {'✅ Available' if illustration_generator.diffusion_available else '📝 Placeholder mode'}")
+    logger.info(f"🛡️  Safety Filter: {'✅ Enabled' if Config.ENABLE_SAFETY_FILTER else '⚠️  Disabled'}")
+    logger.info("🌟 Ready to generate magical stories!")
+    yield
+    # Shutdown
+    logger.info("👋 Shutting down AI Children's Book Generator")
+
+# Initialize FastAPI app with lifespan
 app = FastAPI(
     title="AI Children's Book Generator",
     description="Generate personalized children's books using AI",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan  # Updated to use lifespan instead of on_event
 )
 
 # Add CORS middleware
@@ -427,13 +459,6 @@ app.add_middleware(
 story_generator = StoryGenerator()
 illustration_generator = IllustrationGenerator()
 safety_filter = SafetyFilter()
-
-# Global stats (in production, use a database)
-app_stats = {
-    "books_generated": 0,
-    "total_generation_time": 0.0,
-    "startup_time": datetime.now().isoformat()
-}
 
 # =============================================================================
 # API ENDPOINTS
@@ -726,17 +751,8 @@ async def update_stats(generation_time: float):
     app_stats["total_generation_time"] += generation_time
 
 # =============================================================================
-# APPLICATION STARTUP
+# MAIN ENTRY POINT
 # =============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Application startup tasks"""
-    logger.info("🚀 Starting AI Children's Book Generator")
-    logger.info(f"📝 OpenAI API: {'✅ Connected' if Config.OPENAI_API_KEY else '❌ Missing'}")
-    logger.info(f"🎨 Image Generation: {'✅ Available' if illustration_generator.diffusion_available else '📝 Placeholder mode'}")
-    logger.info(f"🛡️  Safety Filter: {'✅ Enabled' if Config.ENABLE_SAFETY_FILTER else '⚠️  Disabled'}")
-    logger.info("🌟 Ready to generate magical stories!")
 
 if __name__ == "__main__":
     print("=" * 60)
@@ -745,15 +761,16 @@ if __name__ == "__main__":
     print("📋 Setup Checklist:")
     print(f"   • OpenAI API Key: {'✅' if Config.OPENAI_API_KEY else '❌ Set OPENAI_API_KEY environment variable'}")
     print(f"   • GPU Available: {'✅' if torch.cuda.is_available() and DIFFUSION_AVAILABLE else '⚠️  CPU mode (slower image generation)'}")
-    print(f"   • Dependencies: {'✅' if DIFFUSION_AVAILABLE else '⚠️  Run: pip install torch diffusers'}")
+    print(f"   • Dependencies: {'✅' if DIFFUSION_AVAILABLE else '⚠️  Run: pip install transformers'}")
     print("\n🚀 Starting server...")
     print("   • API Documentation: http://localhost:8000/docs")
     print("   • Web Interface: http://localhost:8000")
     print("   • Health Check: http://localhost:8000/health")
     print("=" * 60)
     
+    # Run with import string for better reload support
     uvicorn.run(
-        app,
+        "main:app",  # Use import string instead of app object
         host="0.0.0.0",
         port=8000,
         reload=True,
