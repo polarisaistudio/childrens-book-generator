@@ -13,16 +13,12 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-# Load environment variables
-from dotenv import load_dotenv
-load_dotenv()
-
 # FastAPI and web framework imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
-from pydantic import BaseModel, field_validator  # Updated import
+from pydantic import BaseModel, field_validator
 import uvicorn
 
 # AI/ML imports
@@ -67,6 +63,9 @@ class Config:
     def validate(cls):
         """Validate required configuration"""
         if not cls.OPENAI_API_KEY:
+            print("❌ OPENAI_API_KEY environment variable is required")
+            print("💡 Set it with: export OPENAI_API_KEY='sk-your-key-here'")
+            print("🔑 Get your key at: https://platform.openai.com/api-keys")
             raise ValueError("OPENAI_API_KEY environment variable is required")
         return True
 
@@ -86,7 +85,7 @@ class BookRequest(BaseModel):
     book_length: Optional[str] = "short"  # short, medium, long
     illustration_style: Optional[str] = "cartoon"  # cartoon, watercolor, realistic
     
-    @field_validator('child_name')  # Updated to Pydantic V2
+    @field_validator('child_name')
     @classmethod
     def validate_child_name(cls, v):
         if not v or len(v.strip()) < 1:
@@ -95,14 +94,14 @@ class BookRequest(BaseModel):
             raise ValueError('Child name must be less than 50 characters')
         return v.strip()
     
-    @field_validator('age')  # Updated to Pydantic V2
+    @field_validator('age')
     @classmethod
     def validate_age(cls, v):
         if v < 3 or v > 12:
             raise ValueError('Age must be between 3 and 12 years')
         return v
     
-    @field_validator('interests')  # Updated to Pydantic V2
+    @field_validator('interests')
     @classmethod
     def validate_interests(cls, v):
         if not v or len(v) == 0:
@@ -328,29 +327,65 @@ class IllustrationGenerator:
     
     def _create_placeholder_image(self, prompt: str, child_name: str) -> str:
         """Create a colorful placeholder image"""
-        img = Image.new('RGB', (Config.IMAGE_WIDTH, Config.IMAGE_HEIGHT), color='lightblue')
+        # Create a gradient background
+        img = Image.new('RGB', (Config.IMAGE_WIDTH, Config.IMAGE_HEIGHT))
+        
+        # Create gradient effect
+        for y in range(Config.IMAGE_HEIGHT):
+            for x in range(Config.IMAGE_WIDTH):
+                # Create a nice gradient from blue to purple
+                r = int(102 + (x / Config.IMAGE_WIDTH) * 100)  # 102 to 202
+                g = int(126 + (y / Config.IMAGE_HEIGHT) * 50)  # 126 to 176
+                b = int(234 - (x / Config.IMAGE_WIDTH) * 50)   # 234 to 184
+                img.putpixel((x, y), (r, g, b))
+        
         draw = ImageDraw.Draw(img)
         
         # Try to load a font, fall back to default if not available
         try:
-            font = ImageFont.truetype("arial.ttf", 24)
+            font_large = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", 28)
+            font_small = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", 20)
         except:
-            font = ImageFont.load_default()
+            try:
+                font_large = ImageFont.truetype("arial.ttf", 28)
+                font_small = ImageFont.truetype("arial.ttf", 20)
+            except:
+                font_large = ImageFont.load_default()
+                font_small = ImageFont.load_default()
         
-        # Add text to image
+        # Add decorative elements
+        # Draw some stars
+        import random
+        random.seed(42)  # Consistent placement
+        for _ in range(15):
+            x = random.randint(20, Config.IMAGE_WIDTH - 20)
+            y = random.randint(20, Config.IMAGE_HEIGHT - 120)
+            star_size = random.randint(3, 8)
+            draw.ellipse([x-star_size, y-star_size, x+star_size, y+star_size], 
+                        fill='white', outline='gold')
+        
+        # Add text with shadow effect
         text_lines = [
-            f"Story Scene",
+            f"✨ Story Scene ✨",
             f"Featuring {child_name}",
-            prompt[:30] + "..." if len(prompt) > 30 else prompt
+            prompt[:35] + "..." if len(prompt) > 35 else prompt
         ]
         
-        y_position = Config.IMAGE_HEIGHT // 4
-        for line in text_lines:
+        y_position = Config.IMAGE_HEIGHT // 2 - 60
+        for i, line in enumerate(text_lines):
+            font = font_large if i == 0 else font_small
+            
+            # Calculate text position for centering
             bbox = draw.textbbox((0, 0), line, font=font)
             text_width = bbox[2] - bbox[0]
             x_position = (Config.IMAGE_WIDTH - text_width) // 2
-            draw.text((x_position, y_position), line, fill='darkblue', font=font)
-            y_position += 40
+            
+            # Draw shadow
+            draw.text((x_position + 2, y_position + 2), line, fill='black', font=font)
+            # Draw main text
+            draw.text((x_position, y_position), line, fill='white', font=font)
+            
+            y_position += 40 if i == 0 else 30
         
         return self._image_to_base64(img)
     
@@ -443,7 +478,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan  # Updated to use lifespan instead of on_event
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -461,7 +496,7 @@ illustration_generator = IllustrationGenerator()
 safety_filter = SafetyFilter()
 
 # =============================================================================
-# API ENDPOINTS
+# API ENDPOINTS (Same as before - HTML interface, health, generate-book, stats)
 # =============================================================================
 
 @app.get("/", response_class=HTMLResponse)
@@ -487,6 +522,7 @@ async def root():
             .loading { display: none; text-align: center; color: #667eea; }
             .error { color: #dc3545; background: #f8d7da; padding: 15px; border-radius: 8px; margin-top: 20px; }
             .illustration { max-width: 200px; margin: 10px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         </style>
     </head>
     <body>
@@ -557,13 +593,6 @@ async def root():
             </div>
         </div>
 
-        <style>
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-        </style>
-
         <script>
             document.getElementById('bookForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
@@ -577,13 +606,11 @@ async def root():
                     book_length: document.getElementById('bookLength').value
                 };
                 
-                // Validation
                 if (!formData.child_name || !formData.age || formData.interests.length === 0) {
                     alert('Please fill in all required fields!');
                     return;
                 }
                 
-                // Show loading
                 document.getElementById('loading').style.display = 'block';
                 document.getElementById('result').style.display = 'none';
                 document.getElementById('generateBtn').disabled = true;
@@ -602,7 +629,6 @@ async def root():
                     
                     const book = await response.json();
                     
-                    // Display results
                     document.getElementById('bookTitle').textContent = book.title;
                     
                     let contentHtml = '<h3>📖 Your Story:</h3>';
@@ -614,7 +640,6 @@ async def root():
                     });
                     document.getElementById('bookContent').innerHTML = contentHtml;
                     
-                    // Display illustrations
                     if (book.illustrations && book.illustrations.length > 0) {
                         let illustrationsHtml = '<h3>🎨 Illustrations:</h3><div style="text-align: center;">';
                         book.illustrations.forEach((img, index) => {
@@ -624,7 +649,6 @@ async def root():
                         document.getElementById('bookIllustrations').innerHTML = illustrationsHtml;
                     }
                     
-                    // Display stats
                     document.getElementById('bookStats').innerHTML = `
                         <strong>Generation Details:</strong><br>
                         • Generated in ${book.generation_time.toFixed(2)} seconds<br>
@@ -671,18 +695,14 @@ async def generate_book(request: BookRequest, background_tasks: BackgroundTasks)
     start_time = time.time()
     
     try:
-        # Generate unique book ID
         book_id = f"book_{int(time.time() * 1000)}"
         
-        # Generate story
         logger.info(f"🎨 Generating story for {request.child_name}, age {request.age}")
         story_data = await story_generator.generate_story(request)
         
-        # Apply safety filter
         if Config.ENABLE_SAFETY_FILTER:
             story_data = safety_filter.filter_story(story_data, request.age)
         
-        # Generate illustrations
         illustrations = []
         if story_data.get('scenes'):
             for scene in story_data['scenes']:
@@ -693,7 +713,6 @@ async def generate_book(request: BookRequest, background_tasks: BackgroundTasks)
                 )
                 illustrations.append(illustration)
         
-        # Create response
         total_time = time.time() - start_time
         
         response = GeneratedBook(
@@ -712,7 +731,6 @@ async def generate_book(request: BookRequest, background_tasks: BackgroundTasks)
             }
         )
         
-        # Update stats in background
         background_tasks.add_task(update_stats, total_time)
         
         logger.info(f"✅ Book generated successfully in {total_time:.2f}s - ID: {book_id}")
@@ -741,18 +759,10 @@ async def get_stats():
         }
     }
 
-# =============================================================================
-# BACKGROUND TASKS & UTILITIES
-# =============================================================================
-
 async def update_stats(generation_time: float):
     """Update application statistics"""
     app_stats["books_generated"] += 1
     app_stats["total_generation_time"] += generation_time
-
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
 
 if __name__ == "__main__":
     print("=" * 60)
@@ -761,16 +771,15 @@ if __name__ == "__main__":
     print("📋 Setup Checklist:")
     print(f"   • OpenAI API Key: {'✅' if Config.OPENAI_API_KEY else '❌ Set OPENAI_API_KEY environment variable'}")
     print(f"   • GPU Available: {'✅' if torch.cuda.is_available() and DIFFUSION_AVAILABLE else '⚠️  CPU mode (slower image generation)'}")
-    print(f"   • Dependencies: {'✅' if DIFFUSION_AVAILABLE else '⚠️  Run: pip install transformers'}")
+    print(f"   • Dependencies: {'✅' if DIFFUSION_AVAILABLE else '⚠️  Install: pip install transformers'}")
     print("\n🚀 Starting server...")
     print("   • API Documentation: http://localhost:8000/docs")
     print("   • Web Interface: http://localhost:8000")
     print("   • Health Check: http://localhost:8000/health")
     print("=" * 60)
     
-    # Run with import string for better reload support
     uvicorn.run(
-        "main:app",  # Use import string instead of app object
+        "main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
